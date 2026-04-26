@@ -1,23 +1,15 @@
 {
   "name": "sky-safari-backend",
   "version": "1.0.0",
-  "description": "Sky Safari Paragliding chatbot backend with Twilio WhatsApp integration",
+  "description": "Sky Safari Chatbot Backend",
   "main": "sky-safari-backend-trained.js",
   "scripts": {
-    "start": "node sky-safari-backend-trained.js",
-    "dev": "nodemon sky-safari-backend-trained.js"
+    "start": "node sky-safari-backend-trained.js"
   },
   "dependencies": {
     "express": "^4.18.2",
     "cors": "^2.8.5",
-    "twilio": "^4.10.0",
-    "axios": "^1.6.0",
-    "dotenv": "^16.0.3"
-  },
-  "devDependencies": {
-    "nodemon": "^2.0.22"
-  },
-  "engines": {
-    "node": "18.x"
+    "@anthropic-ai/sdk": "^0.24.0",
+    "twilio": "^4.10.0"
   }
 }

@@ -172,7 +172,7 @@ PERSONALITY:
 - Guide people toward booking by asking for their details
 `;
 
-// Improved Welcome Message (Multi-part as in user's format)
+// Improved Welcome Message
 const welcomeMessages = [
   `👋 Welcome to Sky Safari Paragliding Cape Town! 🪂
 
@@ -245,7 +245,7 @@ app.post('/api/chat', async (req, res) => {
     const response = await axios.post(
       'https://api.anthropic.com/v1/messages',
       {
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-6',
         max_tokens: 1024,
         system: faqKnowledgeBase,
         messages: [

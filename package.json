@@ -2,10 +2,10 @@
   "name": "sky-safari-backend",
   "version": "1.0.0",
   "description": "Sky Safari Paragliding chatbot backend with Twilio WhatsApp integration",
-  "main": "sky-safari-backend-enhanced.js",
+  "main": "sky-safari-backend-trained.js",
   "scripts": {
-    "start": "node sky-safari-backend-enhanced.js",
-    "dev": "nodemon sky-safari-backend-enhanced.js"
+    "start": "node sky-safari-backend-trained.js",
+    "dev": "nodemon sky-safari-backend-trained.js"
   },
   "dependencies": {
     "express": "^4.18.2",

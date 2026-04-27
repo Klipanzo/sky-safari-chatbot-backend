@@ -23,8 +23,6 @@ const twilioWANumber = process.env.TWILIO_WHATSAPP_NUMBER;
 // ============================================================
 // HELPERS
 // ============================================================
-
-// Format any Date as South Africa local time (GMT+2)
 function formatSAST(date) {
   return date.toLocaleString('en-ZA', {
     timeZone: 'Africa/Johannesburg',
@@ -66,15 +64,14 @@ function logMessage(clientId, messageType, content, whatsapp = null, bookingStat
 }
 
 // ============================================================
-// HEALTH + LOGS ENDPOINTS
+// HEALTH + LOGS
 // ============================================================
 app.get('/health', (req, res) => res.json({ status: 'ok' }));
 
 app.get('/api/logs', (req, res) => {
   try {
     if (!fs.existsSync(logsFile)) return res.json({ logs: [] });
-    const logs = JSON.parse(fs.readFileSync(logsFile, 'utf8'));
-    res.json({ logs });
+    res.json({ logs: JSON.parse(fs.readFileSync(logsFile, 'utf8')) });
   } catch (error) {
     console.error('Error reading logs:', error);
     res.status(500).json({ error: 'Error reading logs' });
@@ -92,7 +89,7 @@ app.get('/api/logs/download', (req, res) => {
 });
 
 // ============================================================
-// REGULAR CHAT — Q&A about paragliding
+// REGULAR CHAT
 // ============================================================
 app.post('/api/chat', async (req, res) => {
   const { message, clientId } = req.body;
@@ -268,10 +265,10 @@ If user wants to book or fly, encourage them to say "I want to book" — the boo
 });
 
 // ============================================================
-// SMART BOOKING — Uses Claude to extract booking info naturally
+// SMART BOOKING
 // ============================================================
 app.post('/api/parse-booking', async (req, res) => {
-  const { message, currentBooking, stage, clientId } = req.body;
+  const { message, currentBooking, stage, clientId, lastBotMessage } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
   logMessage(clientId, 'user', message);
@@ -283,6 +280,7 @@ app.post('/api/parse-booking', async (req, res) => {
     whatsapp: null
   };
   const safeStage = stage || 'collecting';
+  const safeLastBot = lastBotMessage || '';
 
   const systemPrompt = `You are Sky Safari Paragliding's smart booking assistant. Extract booking info from messages and reply BRIEFLY and naturally. Use emojis sparingly.
 
@@ -290,34 +288,61 @@ REQUIRED BOOKING FIELDS (only these 4):
 - paxCount: number of people flying (e.g. "5", "2 people", "just me" = 1)
 - bookingName: ONE name to book under (just one is enough — DO NOT ask for all names)
 - dateTime: preferred date and time (e.g. "27 April 1pm", "tomorrow morning")
-- whatsapp: WhatsApp contact number from the CLIENT, MUST include international country code (e.g. "+27 79 580 4496")
+- whatsapp: WhatsApp contact number from the CLIENT, MUST start with "+" and country code, formatted with spaces (e.g. "+27 79 580 4496")
 
 CURRENT BOOKING STATE (already collected so far):
 ${JSON.stringify(safeBooking, null, 2)}
 
 CURRENT STAGE: ${safeStage}
 
+YOUR PREVIOUS BOT MESSAGE (the message YOU just sent, the user is replying to this):
+"""
+${safeLastBot}
+"""
+
 YOUR TASK:
 1. Read the user's NEW message and extract any booking info into the matching fields. Merge with current state — never overwrite a filled field unless the user is clearly correcting it.
 2. Decide the next stage:
-   - "collecting" → some required fields still missing
-   - "confirming" → all 4 fields are now filled AND whatsapp has a country code. Show a brief summary and ask "Shall I send the booking?" (yes/no)
-   - "ready_to_submit" → ONLY set this when the user has just CONFIRMED yes during the confirming stage (e.g. "yes", "send it", "confirm", "go ahead", "ja", "ok send", "yep", "👍")
+   - "collecting" → some required fields still missing OR whatsapp doesn't have country code yet
+   - "confirming" → all 4 fields are now filled AND whatsapp starts with "+" and country code. Show summary and ask "Shall I send the booking?" (yes/no)
+   - "ready_to_submit" → ONLY when user just CONFIRMED yes during the confirming stage (e.g. "yes", "send it", "confirm", "go ahead", "ja", "ok send", "yep", "👍")
 3. Generate a SHORT, friendly response.
 
-⚠️ WHATSAPP COUNTRY CODE — IMPORTANT:
-- When asking for the WhatsApp number for the FIRST time, phrase it as: "What's your WhatsApp number? Please include the country code (e.g. +27 for South Africa) 📱"
-- A valid number MUST start with "+" followed by a country code.
-- If the user provides a number WITHOUT a country code (e.g. "0795804496", "0827654321", "079 580 4496"):
-   * Politely ask: "Just to confirm — is that a South African number? Should I save it as +27 [last 9 digits]? 🇿🇦"
-   * If they say yes/confirm, store the field as the +27 version (drop the leading 0). Example: "0795804496" → "+27 79 580 4496".
-   * If they say no, ask for their country code.
-- If the user provides a number that already starts with "+" or "00", store it cleanly with a leading "+" (convert "0027..." to "+27...").
-- Do NOT mark whatsapp as filled until it has a "+" country code.
-- Once whatsapp is properly formatted with country code, do not ask about it again.
+⚠️ WHATSAPP COUNTRY CODE — CRITICAL RULES:
+
+Format reference: A valid SA number stored looks like "+27 79 580 4496" (plus, space, 27, space, 2 digits, space, 3 digits, space, 4 digits).
+For other countries, use the standard local grouping but always start with "+" and country code.
+
+When asking for the WhatsApp number for the FIRST time, use: "What's your WhatsApp number? Please include the country code (e.g. +27 for South Africa) 📱"
+
+CASE A — User gives a number that already starts with "+":
+   * Example input: "+27795804496" or "+27 79 580 4496" or "+44 7700 900123"
+   * Save it directly, but FORMAT IT NICELY with spaces. e.g. "+27795804496" → "+27 79 580 4496"
+   * Do NOT ask for confirmation — just accept it.
+
+CASE B — User gives a number starting with "0027" or "0044" etc:
+   * Convert "00" to "+". E.g. "0027795804496" → "+27 79 580 4496". Save formatted version directly.
+
+CASE C — User gives a SA-style local number with no country code (starts with "0", looks like "0795804496" or "079 580 4496" or "082 123 4567"):
+   * DO NOT save the whatsapp field yet.
+   * Ask ONCE: "Just to confirm — is that a South African number? Should I save it as +27 79 580 4496? 🇿🇦" (use the actual digits from their message, drop the leading 0, format with spaces)
+   * REMEMBER what number you proposed — your previous bot message will contain it.
+
+CASE D — User replies to a CASE C confirmation question:
+   * If your PREVIOUS BOT MESSAGE proposed a "+27 ..." number AND the user replies with any affirmative ("yes", "yeah", "ja", "yep", "correct", "that's right", "👍", "ok"), you MUST:
+     - Extract the proposed "+27 ..." number from your previous bot message
+     - SAVE IT to the whatsapp field exactly as proposed
+     - DO NOT ask for the WhatsApp number again
+     - Move on (either to confirming stage if all fields filled, or ask for next missing field)
+   * If user replies "no" or "wrong country", ask: "No problem — what country are you in? Please share your number with country code, like +44 for UK or +1 for US 🌍"
+
+CASE E — User gives just "+27" with no digits:
+   * Reply: "Got the country code 🇿🇦 — please share the rest of the number (the 9 digits after +27)"
+   * Don't save whatsapp field yet.
 
 CRITICAL RULES — DO NOT BREAK THESE:
-- ⚠️ The ONLY Sky Safari contact number you may ever mention is +27 72 252 1678.
+- whatsapp field MUST start with "+" and be formatted with spaces (e.g. "+27 79 580 4496") before being saved
+- ⚠️ The ONLY Sky Safari contact number you may ever mention is +27 72 252 1678
 - DO NOT ask about photos/videos package — clients decide AFTER the flight
 - DO NOT ask for special requests
 - DO NOT ask for all passenger names — ONE booking name is enough
@@ -325,12 +350,12 @@ CRITICAL RULES — DO NOT BREAK THESE:
 - If user provides multiple fields in one message, accept them ALL at once
 - If a field is missing, ask ONLY for the missing ones in one short message
 - Keep responses to 1-3 short lines + a few emojis
-- If the user wants to change a field during "confirming", update it, stay in "confirming", and show a fresh summary
-- If the user says no/cancel during confirming, ask what they want to change (stay in "confirming")
-- Tour agents may ask about commission — say you can't confirm that here and they should WhatsApp +27 72 252 1678, but offer to capture the booking in the meantime
-- The whatsapp field is the CLIENT's contact number, not Sky Safari's. If the client gives a number, that's their number.
+- If user wants to change a field during "confirming", update it, stay in "confirming", show fresh summary
+- If user says no/cancel during confirming, ask what to change (stay in "confirming")
+- Tour agents asking about commission — say you can't confirm here, suggest WhatsApp +27 72 252 1678, but offer to capture booking
+- The whatsapp field is the CLIENT's number, never Sky Safari's
 
-CONFIRMING STAGE SUMMARY FORMAT (when transitioning to confirming):
+CONFIRMING STAGE SUMMARY FORMAT:
 Got it! Quick summary:
 
 👥 People: {paxCount}
@@ -361,9 +386,7 @@ OUTPUT FORMAT — Reply with ONLY a valid JSON object, no markdown, no extra tex
     });
 
     let text = response.content[0]?.text || '{}';
-
     text = text.replace(/```json\s*|\s*```/g, '').trim();
-
     const jsonMatch = text.match(/\{[\s\S]*\}/);
     if (jsonMatch) text = jsonMatch[0];
 
@@ -406,7 +429,7 @@ OUTPUT FORMAT — Reply with ONLY a valid JSON object, no markdown, no extra tex
 });
 
 // ============================================================
-// SEND BOOKING — Submits via Twilio WhatsApp
+// SEND BOOKING
 // ============================================================
 app.post('/api/send-booking', async (req, res) => {
   const { paxCount, bookingName, dateTime, whatsapp, clientId } = req.body;

@@ -21,6 +21,23 @@ const skyWANumber = process.env.SKY_SAFARI_WHATSAPP;
 const twilioWANumber = process.env.TWILIO_WHATSAPP_NUMBER;
 
 // ============================================================
+// HELPERS
+// ============================================================
+
+// Format any Date as South Africa local time (GMT+2)
+function formatSAST(date) {
+  return date.toLocaleString('en-ZA', {
+    timeZone: 'Africa/Johannesburg',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  }) + ' SAST';
+}
+
+// ============================================================
 // LOGGING
 // ============================================================
 const logsDir = path.join(__dirname, 'logs');
@@ -35,6 +52,7 @@ function logMessage(clientId, messageType, content, whatsapp = null, bookingStat
     }
     logs.push({
       timestamp: new Date().toISOString(),
+      timestampSAST: formatSAST(new Date()),
       clientId,
       messageType,
       content,
@@ -272,7 +290,7 @@ REQUIRED BOOKING FIELDS (only these 4):
 - paxCount: number of people flying (e.g. "5", "2 people", "just me" = 1)
 - bookingName: ONE name to book under (just one is enough — DO NOT ask for all names)
 - dateTime: preferred date and time (e.g. "27 April 1pm", "tomorrow morning")
-- whatsapp: WhatsApp contact number from the CLIENT (any format, keep as user wrote it)
+- whatsapp: WhatsApp contact number from the CLIENT, MUST include international country code (e.g. "+27 79 580 4496")
 
 CURRENT BOOKING STATE (already collected so far):
 ${JSON.stringify(safeBooking, null, 2)}
@@ -283,9 +301,20 @@ YOUR TASK:
 1. Read the user's NEW message and extract any booking info into the matching fields. Merge with current state — never overwrite a filled field unless the user is clearly correcting it.
 2. Decide the next stage:
    - "collecting" → some required fields still missing
-   - "confirming" → all 4 fields are now filled. Show a brief summary and ask "Shall I send the booking?" (yes/no)
+   - "confirming" → all 4 fields are now filled AND whatsapp has a country code. Show a brief summary and ask "Shall I send the booking?" (yes/no)
    - "ready_to_submit" → ONLY set this when the user has just CONFIRMED yes during the confirming stage (e.g. "yes", "send it", "confirm", "go ahead", "ja", "ok send", "yep", "👍")
 3. Generate a SHORT, friendly response.
+
+⚠️ WHATSAPP COUNTRY CODE — IMPORTANT:
+- When asking for the WhatsApp number for the FIRST time, phrase it as: "What's your WhatsApp number? Please include the country code (e.g. +27 for South Africa) 📱"
+- A valid number MUST start with "+" followed by a country code.
+- If the user provides a number WITHOUT a country code (e.g. "0795804496", "0827654321", "079 580 4496"):
+   * Politely ask: "Just to confirm — is that a South African number? Should I save it as +27 [last 9 digits]? 🇿🇦"
+   * If they say yes/confirm, store the field as the +27 version (drop the leading 0). Example: "0795804496" → "+27 79 580 4496".
+   * If they say no, ask for their country code.
+- If the user provides a number that already starts with "+" or "00", store it cleanly with a leading "+" (convert "0027..." to "+27...").
+- Do NOT mark whatsapp as filled until it has a "+" country code.
+- Once whatsapp is properly formatted with country code, do not ask about it again.
 
 CRITICAL RULES — DO NOT BREAK THESE:
 - ⚠️ The ONLY Sky Safari contact number you may ever mention is +27 72 252 1678.
@@ -386,6 +415,8 @@ app.post('/api/send-booking', async (req, res) => {
     return res.status(400).json({ success: false, message: 'Missing booking details.' });
   }
 
+  const submittedSAST = formatSAST(new Date());
+
   const bookingMessage = `🪂 NEW BOOKING - Sky Safari Paragliding 🪂
 
 👥 Passengers: ${paxCount}
@@ -393,7 +424,7 @@ app.post('/api/send-booking', async (req, res) => {
 📅 Date & Time: ${dateTime}
 📱 WhatsApp: ${whatsapp}
 
-⏰ Submitted: ${new Date().toLocaleString()}
+⏰ Submitted: ${submittedSAST}
 🆔 Client ID: ${clientId}
 
 Please confirm availability and weather window.`;
